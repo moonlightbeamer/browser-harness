@@ -12,8 +12,8 @@ You must be signed in before the harness can drive it. Computer is a paid featur
   - `<id>` is a 22-char base62-ish opaque id (character set includes letters, digits, `-`, and `_`).
   - The full last segment is `<slug>-<id>` joined with a `-`; there's no separator character beyond that. To recover the id, parse with `URL` and take the last 22 chars of the pathname's final segment — **never slice the raw href**, because query/hash (e.g. `?view=thread`) will corrupt the result:
     ```python
-    # JS:  new URL(href).pathname.split('/').pop().slice(-22)
-    # Python: urlparse(href).path.rsplit('/', 1)[-1][-22:]
+    # JS:  new URL(href).pathname.split('/').filter(Boolean).pop().slice(-22)
+    # Python: urlparse(href).path.rstrip('/').rsplit('/', 1)[-1][-22:]
     ```
 - Connectors: `https://www.perplexity.ai/computer/connectors`
 - Custom skills: `https://www.perplexity.ai/computer/skills`
