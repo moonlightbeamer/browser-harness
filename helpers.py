@@ -1,7 +1,9 @@
 """Browser control via CDP. Read, edit, extend -- this file is yours."""
-import base64, json, os, socket, time, urllib.request
+import base64, json, os, tempfile, time, urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
+
+import _ipc as ipc
 
 
 def _load_env():
@@ -19,20 +21,19 @@ def _load_env():
 _load_env()
 
 NAME = os.environ.get("BU_NAME", "default")
-SOCK = f"/tmp/bu-{NAME}.sock"
+SOCK = ipc.sock_addr(NAME)
 INTERNAL = ("chrome://", "chrome-untrusted://", "devtools://", "chrome-extension://", "about:")
 
 
 def _send(req):
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(SOCK)
-    s.sendall((json.dumps(req) + "\n").encode())
+    c = ipc.connect(NAME, timeout=5.0)
+    c.sendall((json.dumps(req) + "\n").encode())
     data = b""
     while not data.endswith(b"\n"):
-        chunk = s.recv(1 << 20)
+        chunk = c.recv(1 << 20)
         if not chunk: break
         data += chunk
-    s.close()
+    c.close()
     r = json.loads(data)
     if "error" in r: raise RuntimeError(r["error"])
     return r
@@ -75,7 +76,7 @@ def click_at_xy(x, y, button="left", clicks=1):
         try:
             from PIL import Image, ImageDraw
             dpr = js("window.devicePixelRatio") or 1
-            path = capture_screenshot(f"/tmp/debug_click_{_debug_click_counter}.png")
+            path = capture_screenshot(str(Path(tempfile.gettempdir()) / f"debug_click_{_debug_click_counter}.png"))
             img = Image.open(path)
             draw = ImageDraw.Draw(img)
             px, py = int(x * dpr), int(y * dpr)
@@ -118,9 +119,10 @@ def scroll(x, y, dy=-300, dx=0):
 
 
 # --- visual ---
-def capture_screenshot(path="/tmp/shot.png", full=False, max_dim=None):
+def capture_screenshot(path=None, full=False, max_dim=None):
     """Save a PNG of the current viewport. Set max_dim=1800 on a 2× display to
     keep the file under the 2000px-per-side limit some image-aware LLMs enforce."""
+    path = path or str(Path(tempfile.gettempdir()) / "shot.png")
     r = cdp("Page.captureScreenshot", format="png", captureBeyondViewport=full)
     open(path, "wb").write(base64.b64decode(r["data"]))
     if max_dim:

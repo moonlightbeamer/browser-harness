@@ -1,9 +1,12 @@
 import json
 import os
 import socket
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
+
+import _ipc as ipc
 
 
 def _load_env():
@@ -23,19 +26,18 @@ _load_env()
 NAME = os.environ.get("BU_NAME", "default")
 BU_API = "https://api.browser-use.com/api/v3"
 GH_RELEASES = "https://api.github.com/repos/browser-use/browser-harness/releases/latest"
-VERSION_CACHE = Path("/tmp/bu-version-cache.json")
+VERSION_CACHE = Path(tempfile.gettempdir()) / "bu-version-cache.json"
 VERSION_CACHE_TTL = 24 * 3600
 
 
 def _paths(name):
     n = name or NAME
-    return f"/tmp/bu-{n}.sock", f"/tmp/bu-{n}.pid"
+    return ipc.sock_addr(n), str(ipc.pid_path(n))
 
 
 def _log_tail(name):
-    p = f"/tmp/bu-{name or NAME}.log"
     try:
-        return Path(p).read_text().strip().splitlines()[-1]
+        return ipc.log_path(name or NAME).read_text().strip().splitlines()[-1]
     except (FileNotFoundError, IndexError):
         return None
 
@@ -66,12 +68,8 @@ def _is_local_chrome_mode(env=None):
 
 def daemon_alive(name=None):
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(1)
-        s.connect(_paths(name)[0])
-        s.close()
-        return True
-    except (FileNotFoundError, ConnectionRefusedError, socket.timeout):
+        c = ipc.connect(name or NAME, timeout=1.0); c.close(); return True
+    except (FileNotFoundError, ConnectionRefusedError, TimeoutError, socket.timeout, OSError):
         return False
 
 
@@ -100,7 +98,7 @@ def ensure_daemon(wait=60.0, name=None, env=None):
         p = subprocess.Popen(
             ["uv", "run", "daemon.py"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
-            env=e, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+            env=e, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **ipc.spawn_kwargs(),
         )
         deadline = time.time() + wait
         while time.time() < deadline:
@@ -113,7 +111,7 @@ def ensure_daemon(wait=60.0, name=None, env=None):
             print("browser-harness: click Allow on chrome://inspect (and tick the checkbox if shown)", file=sys.stderr)
             restart_daemon(name)
             continue
-        raise RuntimeError(msg or f"daemon {name or NAME} didn't come up -- check /tmp/bu-{name or NAME}.log")
+        raise RuntimeError(msg or f"daemon {name or NAME} didn't come up -- check {ipc.log_path(name or NAME)}")
 
 
 def stop_remote_daemon(name="remote"):
@@ -138,14 +136,12 @@ def restart_daemon(name=None):
     ensure_daemon(). The function itself only stops."""
     import signal
 
-    sock, pid_path = _paths(name)
+    _, pid_path = _paths(name)
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(5)
-        s.connect(sock)
-        s.sendall(b'{"meta":"shutdown"}\n')
-        s.recv(1024)
-        s.close()
+        c = ipc.connect(name or NAME, timeout=5.0)
+        c.sendall(b'{"meta":"shutdown"}\n')
+        c.recv(1024)
+        c.close()
     except Exception:
         pass
     try:
@@ -157,18 +153,18 @@ def restart_daemon(name=None):
             try:
                 os.kill(pid, 0)
                 time.sleep(0.2)
-            except ProcessLookupError:
+            except (ProcessLookupError, OSError):
                 break
         else:
             try:
                 os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
+            except (ProcessLookupError, OSError):
                 pass
-    for f in (sock, pid_path):
-        try:
-            os.unlink(f)
-        except FileNotFoundError:
-            pass
+    ipc.cleanup_endpoint(name or NAME)
+    try:
+        os.unlink(pid_path)
+    except FileNotFoundError:
+        pass
 
 
 def _browser_use(path, method, body=None):

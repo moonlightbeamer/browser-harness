@@ -1,8 +1,9 @@
-"""CDP WS holder + Unix socket relay. One daemon per BU_NAME."""
+"""CDP WS holder + IPC relay (Unix socket on POSIX, TCP loopback on Windows). One daemon per BU_NAME."""
 import asyncio, json, os, socket, sys, time, urllib.request
 from collections import deque
 from pathlib import Path
 
+import _ipc as ipc
 from cdp_use.client import CDPClient
 
 
@@ -21,9 +22,9 @@ def _load_env():
 _load_env()
 
 NAME = os.environ.get("BU_NAME", "default")
-SOCK = f"/tmp/bu-{NAME}.sock"
-LOG = f"/tmp/bu-{NAME}.log"
-PID = f"/tmp/bu-{NAME}.pid"
+SOCK = ipc.sock_addr(NAME)
+LOG = str(ipc.log_path(NAME))
+PID = str(ipc.pid_path(NAME))
 BUF = 500
 PROFILES = [
     Path.home() / "Library/Application Support/Google/Chrome",
@@ -224,9 +225,6 @@ class Daemon:
 
 
 async def serve(d):
-    if os.path.exists(SOCK):
-        os.unlink(SOCK)
-
     async def handler(reader, writer):
         try:
             line = await reader.readline()
@@ -244,11 +242,19 @@ async def serve(d):
         finally:
             writer.close()
 
-    server = await asyncio.start_unix_server(handler, path=SOCK)
-    os.chmod(SOCK, 0o600)
-    log(f"listening on {SOCK} (name={NAME}, remote={REMOTE_ID or 'local'})")
-    async with server:
-        await d.stop.wait()
+    serve_task = asyncio.create_task(ipc.serve(NAME, handler))
+    stop_task = asyncio.create_task(d.stop.wait())
+    await asyncio.sleep(0.05)  # let serve() bind so sock_addr() resolves to the live endpoint
+    log(f"listening on {ipc.sock_addr(NAME)} (name={NAME}, remote={REMOTE_ID or 'local'})")
+    try:
+        await asyncio.wait({serve_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+        if serve_task.done(): await serve_task  # surfaces a serve crash
+    finally:
+        for t in (serve_task, stop_task):
+            t.cancel()
+            try: await t
+            except (asyncio.CancelledError, Exception): pass
+        ipc.cleanup_endpoint(NAME)
 
 
 async def main():
@@ -259,9 +265,8 @@ async def main():
 
 def already_running():
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(1)
-        s.connect(SOCK); s.close(); return True
-    except (FileNotFoundError, ConnectionRefusedError, socket.timeout):
+        c = ipc.connect(NAME, timeout=1.0); c.close(); return True
+    except (FileNotFoundError, ConnectionRefusedError, TimeoutError, socket.timeout, OSError):
         return False
 
 
