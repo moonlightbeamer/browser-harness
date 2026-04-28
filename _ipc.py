@@ -3,7 +3,10 @@ import asyncio, os, re, socket, subprocess, sys, tempfile
 from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
-_TMP = Path(tempfile.gettempdir())
+# POSIX: /tmp keeps AF_UNIX paths under sun_path limits (104 on macOS, 108 on Linux).
+# tempfile.gettempdir() on macOS returns /var/folders/... (~49 chars) which combined with
+# a 64-char BU_NAME exceeds the limit. Windows uses TCP, so any tempdir is fine.
+_TMP = Path(tempfile.gettempdir()) if IS_WINDOWS else Path("/tmp")
 _NAME_RE = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
 
 
