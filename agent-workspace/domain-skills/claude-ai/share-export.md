@@ -57,7 +57,7 @@ The script reads both via env vars (browser-harness's `-c` doesn't forward extra
 
 It produces two files in the output dir, named from the conversation title slug:
 
-- `<slug>.json` — `{title, turns: [{role, text}]}`
+- `<slug>.json` — `{title, source_url, turns: [{role, text}]}`
 - `<slug>.md` — LLM-friendly transcript with `## Human` / `## Assistant` headers
 
 ## What this skill does NOT cover

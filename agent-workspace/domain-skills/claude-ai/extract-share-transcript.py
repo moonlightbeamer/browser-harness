@@ -54,13 +54,13 @@ out = pathlib.Path(out_dir)
 out.mkdir(parents=True, exist_ok=True)
 
 payload = {"title": title, "source_url": share_url, "turns": turns}
-(out / f"{slug}.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+(out / f"{slug}.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 parts = [f"# {title}", "", f"Source: {share_url}", f"Turns: {len(turns)}", ""]
 for t in turns:
     label = "Human" if t["role"] == "user" else "Assistant"
     parts += [f"## {label}", "", t["text"], ""]
-(out / f"{slug}.md").write_text("\n".join(parts))
+(out / f"{slug}.md").write_text("\n".join(parts), encoding="utf-8")
 
 print(f"title: {title}")
 print(f"turns: {len(turns)}")
