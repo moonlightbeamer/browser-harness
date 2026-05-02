@@ -25,7 +25,7 @@ Paste into Claude Code or Codex:
 ```text
 Set up https://github.com/browser-use/browser-harness for me.
 
-Read `install.md` first to install and connect this repo to my real browser. Then read `SKILL.md` for normal usage. Use `agent-workspace/agent_helpers.py` and `agent-workspace/domain-skills/` for task-specific edits. When you open a setup or verification tab, activate it so I can see the active browser tab. After it is installed, open this repository in my browser and, if I am logged in to GitHub, ask me whether you should star it for me as a quick demo that the interaction works — only click the star if I say yes. If I am not logged in, just go to browser-use.com.
+Read `install.md` first to install and connect this repo to my real browser. Then read `SKILL.md` for normal usage. Use `agent-workspace/agent_helpers.py` for task-specific edits. When you open a setup or verification tab, activate it so I can see the active browser tab. After it is installed, open this repository in my browser and, if I am logged in to GitHub, ask me whether you should star it for me as a quick demo that the interaction works — only click the star if I say yes. If I am not logged in, just go to browser-use.com.
 ```
 
 When this page appears, tick the checkbox so the agent can connect to your browser:
@@ -54,6 +54,7 @@ Useful for stealth, sub-agents, or deployment.<br>
 
 PRs and improvements welcome. The best way to help: **contribute a new domain skill** under [agent-workspace/domain-skills/](agent-workspace/domain-skills/) for a site or task you use often (LinkedIn outreach, ordering on Amazon, filing expenses, etc.). Each skill teaches the agent the selectors, flows, and edge cases it would otherwise have to rediscover.
 
+- **Skills are off by default.** Domain skills are opt-in via `BH_DOMAIN_SKILLS=1` (set it before invoking `browser-harness`). The directory is community-curated and quality varies — defaulting off keeps the average run unaffected while preserving the contribution loop.
 - **Skills are written by the harness, not by you.** Just run your task with the agent — when it figures something non-obvious out, it files the skill itself (see [SKILL.md](SKILL.md)). Please don't hand-author skill files; agent-generated ones reflect what actually works in the browser.
 - Open a PR with the generated `agent-workspace/domain-skills/<site>/` folder — small and focused is great.
 - Bug fixes, docs tweaks, and helper improvements are equally welcome.
