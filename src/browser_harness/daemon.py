@@ -85,6 +85,8 @@ def _ws_from_devtools_active_port(http_url: str) -> str | None:
     if not want_port:
         return None
     host = p.hostname or "127.0.0.1"
+    if ":" in host:  # urlparse strips IPv6 brackets; restore them for the ws:// URL
+        host = f"[{host}]"
     for base in PROFILES:
         try:
             active = (base / "DevToolsActivePort").read_text().splitlines()
