@@ -19,15 +19,31 @@ Use the standard form on `https://x.com/i/flow/login`. Ask the user for credenti
 Once logged in, the home feed is at `https://x.com/home`.
 
 ```python
-# Find the compose box and type
-result = js(r'var el = document.querySelector("[data-testid=\"tweetTextarea_0\"]"); var r = el.getBoundingClientRect(); return JSON.stringify({x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)})')
 import json
+
+# Find the compose box and type
+result = js(r'''
+  var el = document.querySelector("[data-testid=\"tweetTextarea_0\"]");
+  if (!el) return null;
+  var r = el.getBoundingClientRect();
+  return JSON.stringify({x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)});
+''')
+if result is None:
+    raise RuntimeError("compose textarea not found — are you logged in and on x.com/home?")
 pos = json.loads(result)
 click_at_xy(pos["x"], pos["y"])
 type_text("hello world!")
 
 # Find and click Post
-btn = js(r'var b = document.querySelector("[data-testid=\"tweetButtonInline\"]") || document.querySelector("[data-testid=\"tweetButton\"]"); var r = b.getBoundingClientRect(); return JSON.stringify({x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)})')
+btn = js(r'''
+  var b = document.querySelector("[data-testid=\"tweetButtonInline\"]")
+       || document.querySelector("[data-testid=\"tweetButton\"]");
+  if (!b) return null;
+  var r = b.getBoundingClientRect();
+  return JSON.stringify({x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)});
+''')
+if btn is None:
+    raise RuntimeError("post button not found — did the compose surface fail to open?")
 pos = json.loads(btn)
 click_at_xy(pos["x"], pos["y"])
 ```
