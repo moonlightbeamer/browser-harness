@@ -187,33 +187,47 @@ def restart_daemon(name=None):
 
     Name is historical: callers typically follow this with another
     `browser-harness` invocation, which auto-spawns a fresh daemon via
-    ensure_daemon(). The function itself only stops."""
+    ensure_daemon(). The function itself only stops.
+
+    Identity is verified via ipc.identify() before any process signal, so
+    a stale pid file whose number has been reused by an unrelated process
+    is never SIGTERM'd. If the daemon is unreachable, we just clean up the
+    pid file and socket and return — never escalate to a kill-by-pid-file.
+    """
     import signal
 
-    pid_path = str(ipc.pid_path(name or NAME))
-    try:
-        c, token = ipc.connect(name or NAME, timeout=5.0)
-        ipc.request(c, token, {"meta": "shutdown"})
-        c.close()
-    except Exception:
-        pass
-    try:
-        pid = int(open(pid_path).read())
-    except (FileNotFoundError, ValueError):
-        pid = None
-    if pid:
+    name = name or NAME
+    pid_path = str(ipc.pid_path(name))
+
+    # Ask the daemon for its PID. Reaching this confirms (a) the listener
+    # at the IPC endpoint is alive AND (b) gives us the PID we'd need to
+    # signal if it doesn't exit cleanly. If we can't reach it, daemon_pid
+    # is None and we never signal.
+    daemon_pid = ipc.identify(name, timeout=5.0)
+
+    if daemon_pid is not None:
+        try:
+            c, token = ipc.connect(name, timeout=5.0)
+            ipc.request(c, token, {"meta": "shutdown"})
+            c.close()
+        except Exception:
+            pass
         for _ in range(75):
             try:
-                os.kill(pid, 0)
+                os.kill(daemon_pid, 0)
                 time.sleep(0.2)
             except (ProcessLookupError, OSError, SystemError):
                 break
         else:
+            # Daemon acknowledged shutdown but didn't exit in 15s — wedged.
+            # SIGTERM is safe because identify() just confirmed this PID is
+            # the live daemon, not an unrelated PID-reuse victim.
             try:
-                os.kill(pid, signal.SIGTERM)
+                os.kill(daemon_pid, signal.SIGTERM)
             except (ProcessLookupError, OSError, SystemError):
                 pass
-    ipc.cleanup_endpoint(name or NAME)
+
+    ipc.cleanup_endpoint(name)
     try:
         os.unlink(pid_path)
     except FileNotFoundError:

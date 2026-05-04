@@ -252,3 +252,84 @@ def test_start_remote_daemon_does_not_stop_created_browser_on_success(monkeypatc
     assert calls == [
         ("/browsers", "POST", {}),
     ]
+
+
+# --- restart_daemon: PID-reuse safety ---
+
+def test_restart_daemon_does_not_signal_when_daemon_unreachable(monkeypatch, tmp_path):
+    """If ipc.identify() returns None (daemon gone), restart_daemon must NOT
+    fall back to reading the pid file and SIGTERMing whatever owns that PID —
+    that's the PID-reuse hazard. It should only clean up files."""
+    pid_path = tmp_path / "default.pid"
+    # A pid file with a PID that, if signaled, would hit an unrelated process.
+    # The whole point is that we don't read or trust this number.
+    pid_path.write_text("99999")
+
+    kill_calls = []
+    monkeypatch.setattr(admin.os, "kill", lambda pid, sig: kill_calls.append((pid, sig)))
+    monkeypatch.setattr(admin.ipc, "identify", lambda name, timeout=5.0: None)
+    monkeypatch.setattr(admin.ipc, "pid_path", lambda name: pid_path)
+    monkeypatch.setattr(admin.ipc, "cleanup_endpoint", lambda name: None)
+
+    # Should not raise, should not signal, should still clean up the pid file.
+    admin.restart_daemon("default")
+
+    assert kill_calls == [], (
+        f"restart_daemon SIGTERM'd a PID despite identify() returning None — "
+        f"this is the PID-reuse hazard the function is meant to avoid. Calls: {kill_calls}"
+    )
+    assert not pid_path.exists(), "stale pid file should be cleaned up"
+
+
+def test_restart_daemon_signals_pid_returned_by_identify_not_pid_file(monkeypatch, tmp_path):
+    """The PID we signal must come from the live daemon's self-report, never
+    from the pid file. If a stale pid file disagrees, the live daemon's PID wins."""
+    import signal
+
+    pid_path = tmp_path / "default.pid"
+    pid_path.write_text("99999")  # bogus stale value — must be ignored
+
+    live_pid = 4242
+
+    kill_calls = []
+    def fake_kill(pid, sig):
+        kill_calls.append((pid, sig))
+        # First os.kill(pid, 0) probe: report process is gone so we exit the loop
+        # without escalating. We just want to see WHICH pid was probed.
+        if sig == 0:
+            raise ProcessLookupError
+
+    class FakeIPC:
+        def __init__(self):
+            self.shutdown_sent = False
+        def identify(self, name, timeout=5.0):
+            return live_pid
+        def connect(self, name, timeout):
+            return ("conn", "tok")
+        def request(self, conn, tok, msg):
+            if msg.get("meta") == "shutdown":
+                self.shutdown_sent = True
+            return {"ok": True}
+        def pid_path(self, name):
+            return pid_path
+        def cleanup_endpoint(self, name):
+            pass
+
+    fake = FakeIPC()
+    monkeypatch.setattr(admin.os, "kill", fake_kill)
+    monkeypatch.setattr(admin.ipc, "identify", fake.identify)
+    monkeypatch.setattr(admin.ipc, "connect", fake.connect)
+    monkeypatch.setattr(admin.ipc, "request", fake.request)
+    monkeypatch.setattr(admin.ipc, "pid_path", fake.pid_path)
+    monkeypatch.setattr(admin.ipc, "cleanup_endpoint", fake.cleanup_endpoint)
+
+    admin.restart_daemon("default")
+
+    assert fake.shutdown_sent, "expected shutdown IPC to be sent"
+    assert kill_calls, "expected at least one os.kill probe"
+    pids_signaled = {pid for pid, _ in kill_calls}
+    assert pids_signaled == {live_pid}, (
+        f"restart_daemon must only signal the PID returned by identify(); "
+        f"signaled pids: {pids_signaled}, expected {{{live_pid}}} (and NOT 99999)"
+    )
+    assert not pid_path.exists()

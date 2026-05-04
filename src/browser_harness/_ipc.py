@@ -105,6 +105,29 @@ def ping(name, timeout=1.0):
         except OSError: pass
 
 
+def identify(name, timeout=1.0):
+    """Return the live daemon's PID, or None if unreachable.
+
+    Used by restart_daemon() to signal a process whose identity has been
+    verified end-to-end (live IPC + self-reported PID), instead of trusting
+    a pid file whose number may have been reused by an unrelated process."""
+    try:
+        c, token = connect(name, timeout=timeout)
+    except (FileNotFoundError, ConnectionRefusedError, TimeoutError, socket.timeout, OSError):
+        return None
+    try:
+        resp = request(c, token, {"meta": "ping"})
+        if resp.get("pong") is not True:
+            return None
+        pid = resp.get("pid")
+        return int(pid) if isinstance(pid, int) else None
+    except (OSError, ValueError):
+        return None
+    finally:
+        try: c.close()
+        except OSError: pass
+
+
 async def serve(name, handler):
     """Run the server until cancelled. handler(reader, writer) sees the same interface either way."""
     global _server_token
