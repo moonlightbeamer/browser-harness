@@ -117,11 +117,17 @@ def identify(name, timeout=1.0):
         return None
     try:
         resp = request(c, token, {"meta": "ping"})
-        if resp.get("pong") is not True:
+        # request() returns parsed JSON, which may be any valid value (a list,
+        # scalar, etc. from a stale or hostile endpoint). Anything that isn't
+        # a {pong: true} dict gets None — never .get() on a non-dict.
+        if not isinstance(resp, dict) or resp.get("pong") is not True:
             return None
         pid = resp.get("pid")
-        return int(pid) if isinstance(pid, int) else None
-    except (OSError, ValueError):
+        # `type(pid) is int` (not isinstance) intentionally rejects bool: in
+        # Python, isinstance(True, int) is True, so a hostile/buggy daemon
+        # could reply with {"pid": True} and we'd treat that as PID 1 (init).
+        return pid if type(pid) is int else None
+    except (OSError, ValueError, AttributeError):
         return None
     finally:
         try: c.close()
