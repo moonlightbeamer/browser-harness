@@ -200,15 +200,32 @@ class Daemon:
         ))["sessionId"]
         self.target_id = pages[0]["targetId"]
         log(f"attached {pages[0]['targetId']} ({pages[0].get('url','')[:80]}) session={self.session}")
-        for d in ("Page", "DOM", "Runtime", "Network"):
+        await self._enable_default_domains(self.session)
+        return pages[0]
+
+    async def _enable_default_domains(self, session_id):
+        """Enable Page/DOM/Runtime/Network on a CDP session.
+
+        Used by both initial attach and set_session (called after switch_tab/
+        new_tab). Without this, helpers that depend on Network.* events —
+        notably wait_for_network_idle() — silently stop receiving events
+        after a tab switch, because each fresh CDP session starts with all
+        domains disabled.
+
+        Runs the four enables in parallel via gather so the worst-case time is
+        bounded by a single CDP round trip rather than four sequential ones —
+        important on the set_session path, where the helper's IPC socket has
+        a 5s read timeout.
+        """
+        async def enable_one(d):
             try:
                 await asyncio.wait_for(
-                    self.cdp.send_raw(f"{d}.enable", session_id=self.session),
-                    timeout=5
+                    self.cdp.send_raw(f"{d}.enable", session_id=session_id),
+                    timeout=4,
                 )
             except Exception as e:
-                log(f"enable {d}: {e}")
-        return pages[0]
+                log(f"enable {d} on {session_id}: {e}")
+        await asyncio.gather(*(enable_one(d) for d in ("Page", "DOM", "Runtime", "Network")))
 
     async def start(self):
         self.stop = asyncio.Event()
@@ -272,12 +289,39 @@ class Daemon:
                 }
             return {"target_id": self.target_id, "session_id": self.session, "page": page}
         if meta == "set_session":
+            old_session = self.session
             self.session = req.get("session_id")
             self.target_id = req.get("target_id") or self.target_id
-            try:
-                await asyncio.wait_for(self.cdp.send_raw("Page.enable", session_id=self.session), timeout=3)
-                await asyncio.wait_for(self.cdp.send_raw("Runtime.evaluate", {"expression": "if(!document.title.startsWith('\U0001F7E2'))document.title='\U0001F7E2 '+document.title"}, session_id=self.session), timeout=2)
-            except Exception: pass
+            # Run the old-session Network.disable (defense in depth — keeps
+            # background-tab traffic out of the global event buffer; the
+            # consumer-side filter in wait_for_network_idle is the actual
+            # correctness gate) in parallel with the four enables on the new
+            # session. Different sessions, independent CDP requests. Keeps
+            # the synchronous reply under the helper's 5s IPC read timeout
+            # even on a remote daemon — sequentially these would have stacked
+            # to ~22s worst case.
+            tasks = []
+            if old_session and old_session != self.session:
+                async def disable_old():
+                    try:
+                        await asyncio.wait_for(
+                            self.cdp.send_raw("Network.disable", session_id=old_session),
+                            timeout=2,
+                        )
+                    except Exception: pass
+                tasks.append(disable_old())
+            tasks.append(self._enable_default_domains(self.session))
+            await asyncio.gather(*tasks)
+            # 🟢 tab-marker title prefix is purely cosmetic — fire-and-forget so
+            # it doesn't add to the synchronous IPC budget.
+            asyncio.create_task(_silent(asyncio.wait_for(
+                self.cdp.send_raw(
+                    "Runtime.evaluate",
+                    {"expression": "if(!document.title.startsWith('\U0001F7E2'))document.title='\U0001F7E2 '+document.title"},
+                    session_id=self.session,
+                ),
+                timeout=2,
+            )))
             return {"session_id": self.session}
         if meta == "pending_dialog": return {"dialog": self.dialog}
         if meta == "shutdown":    self.stop.set(); return {"ok": True}
