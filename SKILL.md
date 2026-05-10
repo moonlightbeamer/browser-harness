@@ -1,5 +1,5 @@
 ---
-name: browser
+name: browser-harness
 description: Direct browser control via CDP. Use when the user wants to automate, scrape, test, or interact with web pages. Connects to the user's already-running Chrome.
 ---
 
