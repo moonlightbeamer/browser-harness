@@ -22,8 +22,10 @@ One websocket to Chrome, nothing between. The agent writes what's missing during
 
 Paste into Claude Code or Codex:
 
+<!-- forked from browser-use/browser-harness to keep agent-generated helpers and domain skills out of upstream -->
+<!-- original: Set up https://github.com/browser-use/browser-harness for me. -->
 ```text
-Set up https://github.com/browser-use/browser-harness for me.
+Set up https://github.com/moonlightbeamer/browser-harness for me.
 
 Read `install.md` and follow the steps to install browser-harness and connect it to my browser.
 ```

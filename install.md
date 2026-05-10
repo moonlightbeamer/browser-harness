@@ -12,13 +12,16 @@ Use this file only for browser-harness install, browser connection setup, and co
 Clone the repo once into a durable location, then install it as an editable tool so `browser-harness` works from any directory:
 
 ```bash
-git clone https://github.com/browser-use/browser-harness
-cd browser-harness
+# forked from browser-use/browser-harness to keep agent-generated helpers and domain skills out of upstream
+# git clone https://github.com/browser-use/browser-harness          # original upstream
+git clone https://github.com/moonlightbeamer/browser-harness ~/Documents/GitHub/browser-harness  # personal fork, ~/Documents/GitHub/ is local repo root
+# cd browser-harness                                                  # original upstream
+cd ~/Documents/GitHub/browser-harness
 uv tool install -e .
 command -v browser-harness
 ```
 
-That keeps the command global while still pointing at the real repo checkout, so when the agent edits `agent-workspace/agent_helpers.py` the next `browser-harness` uses the new code immediately. Prefer a stable path like `~/Developer/browser-harness`, not `/tmp`.
+That keeps the command global while still pointing at the real repo checkout, so when the agent edits `agent-workspace/agent_helpers.py` the next `browser-harness` uses the new code immediately.
 
 ## Make browser-harness global for the current agent
 
@@ -30,7 +33,16 @@ After the repo is installed, register this repo's `SKILL.md` with the agent you 
   mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills/browser-harness" && ln -sf "$PWD/SKILL.md" "${CODEX_HOME:-$HOME/.codex}/skills/browser-harness/SKILL.md"
   ```
 
-- **Claude Code**: add an import to `~/.claude/CLAUDE.md` that points at this repo's `SKILL.md`, for example `@~/Developer/browser-harness/SKILL.md`.
+<!-- original: - **Claude Code**: add an import to `~/.claude/CLAUDE.md` that points at this repo's `SKILL.md`, for example `@~/Developer/browser-harness/SKILL.md`. -->
+<!-- changed: use ~/.claude/skills/ symlink instead — Claude Code auto-discovers skills there, no CLAUDE.md import needed -->
+- **Claude Code**: symlink `SKILL.md` into `~/.claude/skills/` so it is auto-discovered as a slash command (`/browser`) in every session:
+
+  ```bash
+  mkdir -p ~/.claude/skills/browser/browser-harness
+  ln -sf ~/Documents/GitHub/browser-harness/SKILL.md ~/.claude/skills/browser/browser-harness/SKILL.md
+  ```
+
+  No import in `~/.claude/CLAUDE.md` needed — Claude Code picks up skills from `~/.claude/skills/` automatically.
 
 This makes new Codex or Claude Code sessions in other folders load the runtime browser harness instructions automatically.
 
